@@ -3,4 +3,5 @@
 members = [
 	"gamepad_gui",
 	"demo",
+	"bootmgr",
 ]

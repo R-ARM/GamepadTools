@@ -1,0 +1,9 @@
+[package]
+name = "bootmgr"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+gamepad_gui = { path = "../gamepad_gui" }
+efivar = "0.2.1"
+regex = "1.6.0"
