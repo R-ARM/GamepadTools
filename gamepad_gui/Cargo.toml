@@ -1,0 +1,8 @@
+[package]
+name = "gamepad_gui"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sdl2 = { version = "0.35.2", features = [ "ttf", "unsafe_textures" ] }
+derivative = "2.2.0"

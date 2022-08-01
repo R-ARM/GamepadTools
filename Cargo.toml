@@ -1,0 +1,6 @@
+[workspace]
+
+members = [
+	"gamepad_gui",
+	"demo",
+]
