@@ -1,11 +1,12 @@
 use gamepad_gui::ToolkitBuilder;
+use efivar::efi::{VariableName, VariableFlags};
+use std::str::FromStr;
+use std::io::BufRead;
 use regex::Regex;
-use efivar::efi::VariableVendor;
 
 #[derive(Debug)]
 struct Entry {
     id: u16,
-    boot_id: String,
     description: String,
 }
 
@@ -25,7 +26,7 @@ impl Entry {
         }
 
         let mut pathlist: Vec<u8> = vec![];
-        for (i, byte) in buf.iter().skip(end_desc).enumerate() {
+        for byte in buf.iter().skip(end_desc) {
             pathlist.push(byte.clone());
         }
 
@@ -58,13 +59,13 @@ impl Entry {
         };
 
         Some(Entry {
-            boot_id, id,
+            id,
             description: String::from_utf8_lossy(&desc).to_string(),
         })
     }
 }
 
-fn main() {
+fn main() -> Result<(), efivar::Error> {
     /*let mut tk = ToolkitBuilder::new("Testing")
         .tab("whatever")
         .button("idk")
@@ -80,7 +81,7 @@ fn main() {
     }*/
 
     let boot_xxxx = Regex::new(r"^Boot\d\d\d\d$").unwrap();
-    let manager = efivar::system();
+    let mut manager = efivar::system();
     let mut buf = vec![0u8; 512];
     let mut options: Vec<Entry> = Vec::new();
 
@@ -99,7 +100,23 @@ fn main() {
 
     options.sort_by_key(|s| s.id);
 
-    for opt in options {
-        println!("Choice: {}", opt.description);
+    for opt in &options {
+        println!("Choose next boot: {}: {}", opt.id, opt.description);
     }
+
+    let stdin = std::io::stdin();
+    let input = stdin.lock().lines().next().unwrap().unwrap();
+    let tmp: u16 = u16::from_str(&input).unwrap();
+    if let Some(choice) = options.iter().find(|s| s.id == tmp) {
+        println!("Setting {}", choice.description);
+
+        let next = VariableName::new("BootNext");
+        let attr = VariableFlags::NON_VOLATILE | VariableFlags::BOOTSERVICE_ACCESS | VariableFlags::RUNTIME_ACCESS;
+        let val: [u8; 2] = choice.id.to_le_bytes();
+
+        //manager.write(&next, attr, &val)?;
+    } else {
+        eprintln!("wrong choice");
+    }
+    Ok(())
 }
