@@ -4,50 +4,98 @@ use std::str::FromStr;
 use std::io::BufRead;
 use regex::Regex;
 
+static DESCRIPTION_OFFSET_BYTES: usize = (32+16)/8;
+
 #[derive(Debug)]
 struct Entry {
     id: u16,
     description: String,
+    path: Vec<String>,
 }
+
+fn char16_to_string(buf: &[u8]) -> (String, usize) {
+    let mut iter = buf.iter();
+    let mut out: Vec<u16> = Vec::new();
+    let mut i: usize = 0;
+
+    loop {
+        i += 2;
+        if let (Some(lower), Some(upper)) = (iter.next(), iter.next()) {
+            let tmp = (*upper as u16) << 8 | *lower as u16;
+            if tmp == '\0' as u16 {
+                break;
+            } else {
+                out.push(tmp);
+            }
+        } else {
+            break;
+        }
+    }
+
+    (std::char::decode_utf16(out)
+        .map(|r| r.unwrap_or(' '))
+        .map(|r| if r.is_ascii() {r} else {' '})
+        .collect::<String>(), i)
+}
+
 
 impl Entry {
     fn new(var: &str, buf: &[u8]) -> Option<Entry> {
-        let mut desc: Vec<u8> = vec![];
-        let mut end_desc: usize = 0;
+        let (description, end) = char16_to_string(&buf[DESCRIPTION_OFFSET_BYTES..]);
+        let desc_end_offset = DESCRIPTION_OFFSET_BYTES + end;
 
-        // with crude conversion of u16 into u8
-        for (i, byte) in buf.iter().skip(6).enumerate() {
-            if i % 2 != 0 { continue; }
-            if *byte == '\0' as u8 {
-                end_desc = i+8; // ????
+        let mut path = Vec::<String>::new();
+        let pathlist: &[u8] = &buf[desc_end_offset..];
+        let cur_start: usize = 0;
+        let mut cur: usize = cur_start;
+
+        loop {
+            let cur_type = pathlist[cur];
+            let subtype = pathlist[cur+1];
+            let len = pathlist[cur+2];
+
+            //println!("type {:X?} subtype {:X?} len {:X?}", cur_type, subtype, len);
+            match cur_type {
+                0x04 => { // Media Device Path
+                    match subtype {
+                        0x01 => path.push("Hard Drive".to_string()),
+                        0x02 => path.push("CD-ROM".to_string()),
+                        0x03 => todo!("Vendor-defined Media Device Path subtype isn't handled!"),
+                        0x04 => {
+                            let (tmp, _) = char16_to_string(&pathlist[cur+4..]);
+                            path.push(tmp);
+                        },
+                        _ => {
+                            todo!("{} Media Device Path subtype not supported", subtype);
+                        }
+                    }
+                },
+                0x05 => path.push("CSM".to_string()),
+                0x7F => { // End of Hardware Device Path
+                    let tmp = if subtype == 0xFF {
+                        "End Entire Device Path"
+                    } else {
+                        "End This Instance of a Device Path and start a new Device Path"
+                    };
+
+                    println!("Wrapping up... found {} node", tmp);
+                    break;
+                }
+                _ => {
+                    todo!("{:X?} Device Path Node type not supported", cur_type);
+                }
+            }
+
+            // advance our "pointer"
+            cur += len as usize;
+
+            if cur >= buf.len() {
                 break;
             }
-            desc.push(byte.clone());
         }
 
-        let mut pathlist: Vec<u8> = vec![];
-        for byte in buf.iter().skip(end_desc) {
-            pathlist.push(byte.clone());
-        }
-
-        match pathlist[0] {
-            0x05 => (), // BIOS Boot Specification Device Path
-            0x04 => {    // Media Device Path
-                let mut path: Vec<u8> = vec![];
-
-                // again, char16 -> char8, also ????
-                for (i, byte) in pathlist[46..].iter().enumerate() {
-                    if i % 2 != 0 { continue; }
-                    path.push(byte.clone());
-                }
-                let tmp = String::from_utf8_lossy(&path).to_lowercase();
-                if tmp.starts_with(r"\efi\boot\bootx64.efi") || tmp.starts_with(r"\efi\boot\bootaa64.efi") {
-                    // Ignore default boot mediums
-                    return None;
-                }
-
-            }
-            _ => return None,
+        for i in &path {
+            println!("{}", i);
         }
 
 
@@ -59,8 +107,9 @@ impl Entry {
         };
 
         Some(Entry {
+            path,
             id,
-            description: String::from_utf8_lossy(&desc).to_string(),
+            description,
         })
     }
 }
@@ -101,7 +150,7 @@ fn main() -> Result<(), efivar::Error> {
     options.sort_by_key(|s| s.id);
 
     for opt in &options {
-        println!("Choose next boot: {}: {}", opt.id, opt.description);
+        println!("Choose next boot: {}: {}, at: {:?}", opt.id, opt.description, opt.path);
     }
 
     let stdin = std::io::stdin();
