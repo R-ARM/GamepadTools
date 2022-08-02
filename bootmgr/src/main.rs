@@ -56,15 +56,41 @@ impl Entry {
 
             //println!("type {:X?} subtype {:X?} len {:X?}", cur_type, subtype, len);
             match cur_type {
+                0x03 => { // Messaging Device Type
+                    match subtype {
+                        01 => path.push("ATAPI".to_string()),
+                        02 => path.push("SCSI".to_string()),
+                        03 | 21 => path.push("Fibre Channel".to_string()),
+                        04 => path.push("1394".to_string()),
+                        05 | 15 | 16 => path.push("USB".to_string()),
+                        06 => path.push("I2O".to_string()),
+                        09 | 11 | 12 | 13 | 20 | 28 | 31
+                            => path.push("Network".to_string()),
+                        10 => path.push("Vendor specific".to_string()),
+                        17 => (), // don't care
+                        18 => path.push("SATA".to_string()),
+                        19 => path.push("iSCSI".to_string()),
+                        22 => path.push("SAS".to_string()),
+                        23 => path.push("NVMe".to_string()),
+                        24 => path.push("URI".to_string()),
+                        25 => path.push("UFS".to_string()),
+                        26 => path.push("SD Card".to_string()),
+                        27 | 30 => path.push("Bluetooth".to_string()),
+                        29 => path.push("eMMC".to_string()),
+                        32 => path.push("NVDIMM".to_string()),
+                        _ => unreachable!("Corrupted data or future spec"),
+                    }
+                }
                 0x04 => { // Media Device Path
                     match subtype {
-                        0x01 => path.push("Hard Drive".to_string()),
-                        0x02 => path.push("CD-ROM".to_string()),
-                        0x03 => todo!("Vendor-defined Media Device Path subtype isn't handled!"),
-                        0x04 => {
+                        01 => path.push("Hard Drive".to_string()),
+                        02 => path.push("CD-ROM".to_string()),
+                        03 => todo!("Vendor-defined Media Device Path subtype isn't handled!"),
+                        04 => {
                             let (tmp, _) = char16_to_string(&pathlist[cur+4..]);
                             path.push(tmp);
                         },
+                        06 | 07 => path.push("UEFI PI".to_string()),
                         _ => {
                             todo!("{} Media Device Path subtype not supported", subtype);
                         }
