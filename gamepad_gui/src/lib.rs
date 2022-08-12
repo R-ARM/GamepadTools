@@ -4,11 +4,15 @@ use std::collections::VecDeque;
 use derivative::Derivative;
 
 use sdl2::{
-    rect::Rect,
+    rect::{
+        Rect,
+        Point,
+    },
     render::{Canvas, Texture},
     pixels::Color,
     event::{Event, EventSender},
     keyboard::Keycode,
+    mouse::MouseButton,
 };
 
 #[inline]
@@ -23,10 +27,11 @@ fn clamp<T: std::cmp::PartialOrd>(x: T, min: T, max: T) -> T {
 }
 
 trait Buttonish {
-    fn draw(&mut self, canvas: &mut Canvas<sdl2::video::Window>, selected: bool);
+    fn draw(&mut self, canvas: &mut Canvas<sdl2::video::Window>, selected: bool, offset_y: i32);
     fn captures_input(&self) -> bool;
     fn action(&mut self, ev: &InternalTkEvent) -> Option<TkEvent>;
     fn name(&self) -> &str;
+    fn rect(&self) -> Rect;
 }
 
 impl core::fmt::Debug for dyn Buttonish {
@@ -49,6 +54,7 @@ struct Slider {
     min: i32,
     max: i32,
     level: i32,
+    grabbed: bool,
 }
 
 impl Slider {
@@ -62,30 +68,42 @@ impl Slider {
             outline_rect: Rect::new((attr.width + 5) as i32, (line as u32 * attr.height) as i32, attr.height*5, attr.height),
             level: init,
             min, max,
+            grabbed: false,
         }
     }
 }
 
 impl Buttonish for Slider {
-    fn draw(&mut self, canvas: &mut Canvas<sdl2::video::Window>, selected: bool) {
+    fn draw(&mut self, canvas: &mut Canvas<sdl2::video::Window>, selected: bool, offset_y: i32) {
         if selected {
             self.text.as_mut().unwrap().set_color_mod(255, 0, 0);
         } else {
             self.text.as_mut().unwrap().set_color_mod(255, 255, 255);
         }
-        canvas.copy(self.text.as_ref().unwrap(), None, self.rect).unwrap();
 
-        canvas.set_draw_color(Color::RGB(255, 255, 255));
+        let mut rect = self.rect.unwrap().clone();
+        rect.set_y(rect.y() + offset_y);
+        canvas.copy(self.text.as_ref().unwrap(), None, rect).unwrap();
+
+
+        self.outline_rect.set_y(rect.y());
+        if self.grabbed {
+            canvas.set_draw_color(Color::RGB(255, 0, 0));
+        } else {
+            canvas.set_draw_color(Color::RGB(255, 255, 255));
+        }
         canvas.draw_rect(self.outline_rect);
 
         if self.level != self.min {
             let mut content_rect = self.outline_rect.clone();
             content_rect.set_width(remap(self.level, self.min, self.max, 0, self.outline_rect.width() as i32) as u32);
+            content_rect.set_y(rect.y());
             canvas.fill_rect(content_rect);
         }
     }
     fn captures_input(&self) -> bool { true }
     fn action(&mut self, ev: &InternalTkEvent) -> Option<TkEvent> {
+        self.grabbed = true;
         return match ev {
             InternalTkEvent::ChangeTabPos(d) => {
                 let new = clamp(self.level + d, self.min, self.max);
@@ -96,11 +114,15 @@ impl Buttonish for Slider {
                     Some(TkEvent::None)
                 }
             },
-            InternalTkEvent::Press   => None,
-            _       => return Some(TkEvent::None),
+            InternalTkEvent::Press => {
+                self.grabbed = false;
+                None
+            },
+            _ => Some(TkEvent::None),
         }
     }
     fn name(&self) -> &str { self.name }
+    fn rect(&self) -> Rect { self.rect.unwrap() }
 }
 
 #[derive(Derivative)]
@@ -115,15 +137,20 @@ struct Toggle {
 }
 
 impl Buttonish for Toggle {
-    fn draw(&mut self, canvas: &mut Canvas<sdl2::video::Window>, selected: bool) {
+    fn draw(&mut self, canvas: &mut Canvas<sdl2::video::Window>, selected: bool, offset_y: i32) {
         if selected {
             self.text.as_mut().unwrap().set_color_mod(255, 0, 0);
         } else {
             self.text.as_mut().unwrap().set_color_mod(255, 255, 255);
         }
-        canvas.copy(self.text.as_ref().unwrap(), None, self.rect).unwrap();
+
+        let mut rect = self.rect.unwrap().clone();
+        rect.set_y(rect.y() + offset_y);
+
+        canvas.copy(self.text.as_ref().unwrap(), None, rect).unwrap();
 
         canvas.set_draw_color(Color::RGB(255, 255, 255));
+        self.state_rect.set_y(rect.y());
         if self.state == true {
             canvas.fill_rect(self.state_rect);
         } else {
@@ -136,6 +163,7 @@ impl Buttonish for Toggle {
         Some(TkEvent::ToggleChange(self.name().to_string(), self.state))
     }
     fn name(&self) -> &str { self.name }
+    fn rect(&self) -> Rect { self.rect.unwrap() }
 }
 
 impl Toggle {
@@ -163,19 +191,23 @@ struct Button {
 }
 
 impl Buttonish for Button {
-    fn draw(&mut self, canvas: &mut Canvas<sdl2::video::Window>, selected: bool) {
+    fn draw(&mut self, canvas: &mut Canvas<sdl2::video::Window>, selected: bool, offset_y: i32) {
         if selected {
             self.text.as_mut().unwrap().set_color_mod(255, 0, 0);
         } else {
             self.text.as_mut().unwrap().set_color_mod(255, 255, 255);
         }
-        canvas.copy(self.text.as_ref().unwrap(), None, self.rect).unwrap();
+
+        let mut rect = self.rect.unwrap().clone();
+        rect.set_y(rect.y() + offset_y);
+        canvas.copy(self.text.as_ref().unwrap(), None, rect).unwrap();
     }
     fn captures_input(&self) -> bool { false }
     fn action(&mut self, _: &InternalTkEvent) -> Option<TkEvent> {
         Some(TkEvent::ButtonPress(self.name().to_string()))
     }
     fn name(&self) -> &str { self.name }
+    fn rect(&self) -> Rect { self.rect.unwrap() }
 }
 
 impl Button {
@@ -203,7 +235,7 @@ struct Tab {
 }
 
 impl Tab {
-    fn draw(&mut self, canvas: &mut Canvas<sdl2::video::Window>, selected: bool) {
+    fn draw(&mut self, canvas: &mut Canvas<sdl2::video::Window>, selected: bool, y_offset: i32) {
         if selected {
             let bottom = self.rect.unwrap().height() as i32;
 
@@ -214,7 +246,7 @@ impl Tab {
             canvas.set_viewport(new);
 
             for (i, btn) in self.buttons.iter_mut().enumerate() {
-                btn.draw(canvas, self.btn_pos == i);
+                btn.draw(canvas, self.btn_pos == i, y_offset);
             }
             canvas.set_viewport(old);
 
@@ -237,7 +269,9 @@ enum InternalTkEvent {
     ChangeTabPos(i32),
     ChangeBtnPos(i32),
     Press,
-    AnimationUpdate,
+    TouchPress(i32, i32),
+    SetOffsetY(i32),
+    AppendOffsetY(i32),
     Quit,
     Dummy,
 }
@@ -267,23 +301,65 @@ pub struct Toolkit {
     #[derivative(Debug="ignore")]
     event_sender: EventSender,
 
+    old_xy: Option<(i32, i32)>,
+    y_offset: i32,
+    y_velocity: i32,
     tk_event_queue: VecDeque<TkEvent>,
     redirect_input: bool,
+    line_height: i32,
 }
 
 impl Toolkit {
     pub fn tick(&mut self) -> bool {
-        self.canvas.set_draw_color(Color::RGB(0, 0, 0));
-        self.canvas.clear();
-        for (i, tab) in self.tabs.iter_mut().enumerate() {
-            tab.draw(&mut self.canvas, self.tab_pos == i);
-        }
-        self.canvas.present();
-
+        let mut redraw = false;
         // blocking!
-        let ev = self.event_pump.wait_event();
-        if ev.is_user_event() {
-            let tk_ev = ev.as_user_event_type::<InternalTkEvent>().unwrap();
+        //let ev = self.event_pump.wait_event();
+        let mut events: Vec<InternalTkEvent> = Vec::new();
+        for ev in self.event_pump.poll_iter() {
+            if ev.is_user_event() {
+                events.push(ev.as_user_event_type::<InternalTkEvent>().unwrap());
+            } else {
+                let out = match ev {
+                    Event::Quit {..} => InternalTkEvent::Quit,
+                    Event::KeyDown {keycode, ..} => {
+                        match keycode {
+                            Some(Keycode::Escape) =>    InternalTkEvent::Quit,
+                            Some(Keycode::Up) =>        InternalTkEvent::ChangeBtnPos(-1),
+                            Some(Keycode::Down) =>      InternalTkEvent::ChangeBtnPos(1),
+                            Some(Keycode::Left) =>      InternalTkEvent::ChangeTabPos(-1),
+                            Some(Keycode::Right) =>     InternalTkEvent::ChangeTabPos(1),
+                            Some(Keycode::Return) =>    InternalTkEvent::Press,
+                            _ => InternalTkEvent::Dummy,
+                        }
+                    }
+                    Event::MouseMotion {x, y, yrel, mousestate, ..} => {
+                        if mousestate.left() {
+                            if yrel == 0 {
+                                InternalTkEvent::TouchPress(x, y)
+                            } else {
+                                InternalTkEvent::AppendOffsetY(yrel)
+                            }
+                        } else {
+                            InternalTkEvent::Dummy
+                        }
+                    }
+                    Event::MouseButtonDown{x, y, mouse_btn, ..} => {
+                        if mouse_btn == MouseButton::Left {
+                            InternalTkEvent::TouchPress(x, y)
+                        } else {
+                            InternalTkEvent::Dummy
+                        }
+                    }
+                    _ => InternalTkEvent::Dummy,
+                };
+
+                if out != InternalTkEvent::Dummy {
+                    events.push(out);
+                }
+            }
+        }
+
+        for tk_ev in events {
             if self.redirect_input && tk_ev != InternalTkEvent::Quit {
                 if let Some(btn) = self.cur_mut_btn() {
                     if let Some(new_ev) = btn.action(&tk_ev) {
@@ -291,59 +367,137 @@ impl Toolkit {
                     } else {
                         self.redirect_input = false;
                     }
+                    redraw = true;
                 }
             } else {
                 match tk_ev {
                     InternalTkEvent::ChangeTabPos(p) => {
                         let new_pos = clamp(self.tab_pos as i32 + p, 0, self.max_tab_pos as i32) as usize;
                         if new_pos != self.tab_pos {
+                            self.y_offset = 0;
                             self.tab_pos = new_pos;
                             self.tk_event_queue.push_back(TkEvent::TabChange(self.cur_tab().unwrap().name.to_string()));
-                        }
-                    }
-                    InternalTkEvent::ChangeBtnPos(p) => 
+                            redraw = true;
+                        };
+                    },
+                    InternalTkEvent::ChangeBtnPos(p) => {
                         if let Some(mut tab) = self.cur_mut_tab() {
                             let new_pos = clamp(tab.btn_pos as i32 + p, 0, tab.max_btn_pos as i32) as usize;
                             if new_pos != tab.btn_pos {
                                 tab.btn_pos = new_pos;
+                                let bottom = if let Some(btn) = self.cur_tab().unwrap().buttons.last() {
+                                    btn.rect().bottom()
+                                } else { unreachable!(); };
+
+                                self.y_offset = clamp(self.y_offset - self.line_height * p, -1*(bottom - (480 - self.line_height)), 0);
                                 self.tk_event_queue.push_back(TkEvent::ButtonSelect(self.cur_btn().unwrap().name().to_string()));
+                                redraw = true;
                             }
-                        },
-                    InternalTkEvent::Press =>
+                        };
+                    },
+                    InternalTkEvent::Press => {
                         if let Some(btn) = self.cur_mut_btn() {
                             if btn.captures_input() {
+                                btn.action(&InternalTkEvent::Dummy);
                                 self.redirect_input = true;
                             } else {
                                 if let Some(new_ev) = btn.action(&tk_ev) {
                                     self.tk_event_queue.push_back(new_ev);
                                 }
                             }
-                        },
-                    InternalTkEvent::AnimationUpdate => todo!("animations"),
-                    InternalTkEvent::Quit =>            self.run = false,
+                            redraw = true;
+                        };
+                    },
+                    InternalTkEvent::Quit => self.run = false,
+                    InternalTkEvent::SetOffsetY(y) => {
+                        self.y_offset = y;
+                        self.y_velocity = 0;
+                        redraw = true;
+                    },
+                    InternalTkEvent::AppendOffsetY(y) => {
+                        self.y_offset += y;
+                        self.y_velocity = y/2;
+                        redraw = true;
+                    },
+                    InternalTkEvent::TouchPress(x, y) => {
+                        let adj_y = y - (self.line_height + self.y_offset);
+                        if y < self.line_height {
+                            let mut new_tab: Option<usize> = None;
+                            for (i, candidate) in self.tabs.iter().enumerate() {
+                                println!("considering {}", candidate.name);
+                                if candidate.rect.unwrap().contains_point(Point::new(x, y)) {
+                                    new_tab = Some(i);
+                                    break;
+                                }
+                            }
+                            if let Some(id) = new_tab {
+                                self.tab_pos = id;
+                                self.tk_event_queue.push_back(TkEvent::TabChange(self.cur_tab().unwrap().name.to_string()));
+                                redraw = true;
+                            }
+                        } else {
+                            let h = self.line_height;
+                            if let Some(mut tab) = self.cur_mut_tab() {
+                                let new_pos = clamp(adj_y / h, 0, tab.max_btn_pos as i32) as usize;
+                                if new_pos == tab.btn_pos {
+                                    if let Some(btn) = self.cur_mut_btn() {
+                                        if btn.captures_input() {
+                                            self.redirect_input = true;
+                                        } else {
+                                            if let Some(new_ev) = btn.action(&tk_ev) {
+                                                self.tk_event_queue.push_back(new_ev);
+                                                redraw = true;
+                                            }
+                                        }
+                                    };
+                                } else {
+                                    tab.btn_pos = new_pos;
+                                    self.tk_event_queue.push_back(TkEvent::ButtonSelect(self.cur_btn().unwrap().name().to_string()));
+                                    redraw = true;
+                                }
+                            }
+                        }
+                    }
                     InternalTkEvent::Dummy => (),
                 }
             }
-        } else {
-            let out = match ev {
-                Event::Quit{..} => InternalTkEvent::Quit,
-                Event::KeyDown {keycode, ..} => {
-                    match keycode {
-                        Some(Keycode::Escape) =>    InternalTkEvent::Quit,
-                        Some(Keycode::Up) =>        InternalTkEvent::ChangeBtnPos(-1),
-                        Some(Keycode::Down) =>      InternalTkEvent::ChangeBtnPos(1),
-                        Some(Keycode::Left) =>      InternalTkEvent::ChangeTabPos(-1),
-                        Some(Keycode::Right) =>     InternalTkEvent::ChangeTabPos(1),
-                        Some(Keycode::Return) =>    InternalTkEvent::Press,
-                        _ => InternalTkEvent::Dummy,
-                    }
-                }
-                _ => InternalTkEvent::Dummy,
-            };
+        }
 
-            if out != InternalTkEvent::Dummy {
-                self.event_sender.push_custom_event(out).unwrap();
+        if self.y_velocity != 0 {
+            self.y_offset += self.y_velocity;
+            if self.y_velocity > 0 {
+                self.y_velocity -= 1;
+            } else {
+                self.y_velocity += 1;
             }
+            redraw = true;
+        }
+
+        if self.y_offset > 0 {
+            self.y_offset /= 2;
+            redraw = true;
+        }
+
+
+        if let Some(btn) = self.cur_tab().unwrap().buttons.last() {
+            let bottom = btn.rect().bottom();
+            let diff = (480 - self.line_height) - (bottom + self.y_offset);
+            if diff > 0 && self.y_offset < -480 {
+                self.y_offset += diff/2;
+                redraw = true;
+            } else if (480 - self.line_height) - bottom > 0 && self.y_offset != 0 {
+                self.y_offset = 0;
+                redraw = true;
+            }
+        }
+
+        if redraw {
+            self.canvas.set_draw_color(Color::RGB(0, 0, 0));
+            self.canvas.clear();
+            for (i, tab) in self.tabs.iter_mut().enumerate() {
+                tab.draw(&mut self.canvas, self.tab_pos == i, self.y_offset);
+            }
+            self.canvas.present();
         }
 
         self.run
@@ -514,6 +668,14 @@ impl TabBuilder {
         }
 
         let max_tab_pos = self.builder.tabs.len() - 1;
+
+        self.builder.canvas.set_draw_color(Color::RGB(0, 0, 0));
+        self.builder.canvas.clear();
+        for (i, tab) in self.builder.tabs.iter_mut().enumerate() {
+            tab.draw(&mut self.builder.canvas, i == 0, 0);
+        }
+        self.builder.canvas.present();
+
         Toolkit {
             run: true,
             canvas: self.builder.canvas,
@@ -524,6 +686,10 @@ impl TabBuilder {
             max_tab_pos,
             redirect_input: false,
             tk_event_queue: VecDeque::new(),
+            old_xy: None,
+            y_offset: 0,
+            y_velocity: 0,
+            line_height: attr.height as i32,
         }
     }
 }

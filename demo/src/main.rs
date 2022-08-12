@@ -1,7 +1,7 @@
 use gamepad_gui::ToolkitBuilder;
 
 fn main() {
-    let names_str = vec!["str names:", "first", "second"];
+    let names_str = vec!["str names:", "first", "second", "third", "fourth", "first", "second", "third", "fourth", "first", "second", "third", "fourth", "first", "second", "third", "fourth", "first", "second", "third", "fourth", "first", "second", "third", "fourth", "first", "second", "third", "fourth", "first", "second", "third", "fourth", "first", "second", "third", "fourth", "first", "second", "third", "fourth"];
 
     let mut tk = ToolkitBuilder::new("Testing")
         .tab("whatever")
