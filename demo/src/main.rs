@@ -5,6 +5,8 @@ fn main() {
 
     let mut tk = ToolkitBuilder::new("Testing")
         .tab("whatever")
+        .toggle("this is a toggle")
+        .slider("slider", 3, 0, 5)
         .button("idk")
         .button("stuff")
         .tab("another tab")

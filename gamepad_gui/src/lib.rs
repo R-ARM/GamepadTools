@@ -1,4 +1,5 @@
 use std::thread;
+use std::num::Wrapping;
 use std::collections::VecDeque;
 use derivative::Derivative;
 
@@ -10,10 +11,146 @@ use sdl2::{
     keyboard::Keycode,
 };
 
+#[inline]
+fn remap(x: i32, min: i32, max: i32, outmin: i32, outmax: i32) -> i32 {
+    (Wrapping(x - min) * Wrapping(outmax - outmin) / Wrapping(max - min) + Wrapping(outmin)).0
+}
+
 fn clamp<T: std::cmp::PartialOrd>(x: T, min: T, max: T) -> T {
     if x < min { return min }
     if x > max { return max }
     return x
+}
+
+trait Buttonish {
+    fn draw(&mut self, canvas: &mut Canvas<sdl2::video::Window>, selected: bool);
+    fn captures_input(&self) -> bool;
+    fn action(&mut self, ev: &InternalTkEvent) -> Option<TkEvent>;
+    fn name(&self) -> &str;
+}
+
+impl core::fmt::Debug for dyn Buttonish {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("dyn Buttonish")
+            .field("captures_input", &self.captures_input())
+            .field("name", &self.name())
+            .finish()
+    }
+}
+
+#[derive(Derivative)]
+#[derivative(Debug)]
+struct Slider {
+    name: &'static str,
+    #[derivative(Debug="ignore")]
+    text: Option<Texture>,
+    rect: Option<Rect>,
+    outline_rect: Rect,
+    min: i32,
+    max: i32,
+    level: i32,
+}
+
+impl Slider {
+    fn new(name: &'static str, text: Texture, line: usize, init: i32, min: i32, max: i32) -> Slider {
+        let attr = text.query();
+        let rect = Rect::new(0, (line as u32 * attr.height) as i32, attr.width, attr.height);
+        Slider {
+            name,
+            text: Some(text),
+            rect: Some(rect),
+            outline_rect: Rect::new((attr.width + 5) as i32, (line as u32 * attr.height) as i32, attr.height*5, attr.height),
+            level: init,
+            min, max,
+        }
+    }
+}
+
+impl Buttonish for Slider {
+    fn draw(&mut self, canvas: &mut Canvas<sdl2::video::Window>, selected: bool) {
+        if selected {
+            self.text.as_mut().unwrap().set_color_mod(255, 0, 0);
+        } else {
+            self.text.as_mut().unwrap().set_color_mod(255, 255, 255);
+        }
+        canvas.copy(self.text.as_ref().unwrap(), None, self.rect).unwrap();
+
+        canvas.set_draw_color(Color::RGB(255, 255, 255));
+        canvas.draw_rect(self.outline_rect);
+
+        if self.level != self.min {
+            let mut content_rect = self.outline_rect.clone();
+            content_rect.set_width(remap(self.level, self.min, self.max, 0, self.outline_rect.width() as i32) as u32);
+            canvas.fill_rect(content_rect);
+        }
+    }
+    fn captures_input(&self) -> bool { true }
+    fn action(&mut self, ev: &InternalTkEvent) -> Option<TkEvent> {
+        return match ev {
+            InternalTkEvent::ChangeTabPos(d) => {
+                let new = clamp(self.level + d, self.min, self.max);
+                if new != self.level {
+                    self.level = new;
+                    Some(TkEvent::SliderChange(self.name().to_string(), self.level, self.min, self.max))
+                } else {
+                    Some(TkEvent::None)
+                }
+            },
+            InternalTkEvent::Press   => None,
+            _       => return Some(TkEvent::None),
+        }
+    }
+    fn name(&self) -> &str { self.name }
+}
+
+#[derive(Derivative)]
+#[derivative(Debug)]
+struct Toggle {
+    name: &'static str,
+    #[derivative(Debug="ignore")]
+    text: Option<Texture>,
+    rect: Option<Rect>,
+    state_rect: Rect,
+    state: bool,
+}
+
+impl Buttonish for Toggle {
+    fn draw(&mut self, canvas: &mut Canvas<sdl2::video::Window>, selected: bool) {
+        if selected {
+            self.text.as_mut().unwrap().set_color_mod(255, 0, 0);
+        } else {
+            self.text.as_mut().unwrap().set_color_mod(255, 255, 255);
+        }
+        canvas.copy(self.text.as_ref().unwrap(), None, self.rect).unwrap();
+
+        canvas.set_draw_color(Color::RGB(255, 255, 255));
+        if self.state == true {
+            canvas.fill_rect(self.state_rect);
+        } else {
+            canvas.draw_rect(self.state_rect);
+        }
+    }
+    fn captures_input(&self) -> bool { false }
+    fn action(&mut self, _: &InternalTkEvent) -> Option<TkEvent> {
+        self.state = !self.state;
+        Some(TkEvent::ToggleChange(self.name().to_string(), self.state))
+    }
+    fn name(&self) -> &str { self.name }
+}
+
+impl Toggle {
+    fn new(name: &'static str, line: usize, text: Texture) -> Toggle {
+        let attr = text.query();
+        let rect = Rect::new(0, (line as u32 * attr.height) as i32, attr.width, attr.height);
+        let state_rect = Rect::new((attr.width + 5) as i32, (line as u32 * attr.height) as i32, attr.height, attr.height);
+        Toggle {
+            name,
+            text: Some(text),
+            rect: Some(rect),
+            state_rect,
+            state: false,
+        }
+    }
 }
 
 #[derive(Derivative)]
@@ -25,7 +162,7 @@ struct Button {
     rect: Option<Rect>,
 }
 
-impl Button {
+impl Buttonish for Button {
     fn draw(&mut self, canvas: &mut Canvas<sdl2::video::Window>, selected: bool) {
         if selected {
             self.text.as_mut().unwrap().set_color_mod(255, 0, 0);
@@ -34,6 +171,14 @@ impl Button {
         }
         canvas.copy(self.text.as_ref().unwrap(), None, self.rect).unwrap();
     }
+    fn captures_input(&self) -> bool { false }
+    fn action(&mut self, _: &InternalTkEvent) -> Option<TkEvent> {
+        Some(TkEvent::ButtonPress(self.name().to_string()))
+    }
+    fn name(&self) -> &str { self.name }
+}
+
+impl Button {
     fn new(name: &'static str, line: usize, text: Texture) -> Button {
         let attr = text.query();
         let rect = Rect::new(0, (line as u32 * attr.height) as i32, attr.width, attr.height);
@@ -49,7 +194,7 @@ impl Button {
 #[derivative(Debug)]
 struct Tab {
     name: &'static str,
-    buttons: Vec<Button>,
+    buttons: Vec<Box<dyn Buttonish>>,
     btn_pos: usize,
     max_btn_pos: usize,
     #[derivative(Debug="ignore")]
@@ -79,6 +224,12 @@ impl Tab {
         }
         canvas.copy(self.text.as_ref().unwrap(), None, self.rect);
     }
+    fn cur_btn(&self) -> Option<&Box<dyn Buttonish>> {
+        self.buttons.get(self.btn_pos)
+    }
+    fn cur_mut_btn(&mut self) -> Option<&mut Box<dyn Buttonish>> {
+        self.buttons.get_mut(self.btn_pos)
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -95,7 +246,10 @@ enum InternalTkEvent {
 pub enum TkEvent {
     ButtonSelect(String),
     ButtonPress(String),
+    SliderChange(String, i32, i32, i32),
+    ToggleChange(String, bool),
     TabChange(String),
+    None,
 }
 
 #[derive(Derivative)]
@@ -114,6 +268,7 @@ pub struct Toolkit {
     event_sender: EventSender,
 
     tk_event_queue: VecDeque<TkEvent>,
+    redirect_input: bool,
 }
 
 impl Toolkit {
@@ -127,32 +282,47 @@ impl Toolkit {
 
         // blocking!
         let ev = self.event_pump.wait_event();
-
         if ev.is_user_event() {
             let tk_ev = ev.as_user_event_type::<InternalTkEvent>().unwrap();
-            match tk_ev {
-                InternalTkEvent::ChangeTabPos(p) => {
-                    let new_pos = clamp(self.tab_pos as i32 + p, 0, self.max_tab_pos as i32) as usize;
-                    if new_pos != self.tab_pos {
-                        self.tab_pos = new_pos;
-                        self.tk_event_queue.push_back(TkEvent::TabChange(self.cur_tab().unwrap().name.to_string()));
+            if self.redirect_input && tk_ev != InternalTkEvent::Quit {
+                if let Some(btn) = self.cur_mut_btn() {
+                    if let Some(new_ev) = btn.action(&tk_ev) {
+                        self.tk_event_queue.push_back(new_ev);
+                    } else {
+                        self.redirect_input = false;
                     }
                 }
-                InternalTkEvent::ChangeBtnPos(p) => 
-                    if let Some(mut tab) = self.cur_mut_tab() {
-                        let new_pos = clamp(tab.btn_pos as i32 + p, 0, tab.max_btn_pos as i32) as usize;
-                        if new_pos != tab.btn_pos {
-                            tab.btn_pos = new_pos;
-                            self.tk_event_queue.push_back(TkEvent::ButtonSelect(self.cur_btn().unwrap().name.to_string()));
+            } else {
+                match tk_ev {
+                    InternalTkEvent::ChangeTabPos(p) => {
+                        let new_pos = clamp(self.tab_pos as i32 + p, 0, self.max_tab_pos as i32) as usize;
+                        if new_pos != self.tab_pos {
+                            self.tab_pos = new_pos;
+                            self.tk_event_queue.push_back(TkEvent::TabChange(self.cur_tab().unwrap().name.to_string()));
                         }
-                    },
-                InternalTkEvent::Press =>
-                    if let Some(btn) = self.cur_btn() {
-                        self.tk_event_queue.push_back(TkEvent::ButtonPress(btn.name.to_string()));
                     }
-                InternalTkEvent::AnimationUpdate => todo!("animations"),
-                InternalTkEvent::Quit =>            self.run = false,
-                InternalTkEvent::Dummy => (),
+                    InternalTkEvent::ChangeBtnPos(p) => 
+                        if let Some(mut tab) = self.cur_mut_tab() {
+                            let new_pos = clamp(tab.btn_pos as i32 + p, 0, tab.max_btn_pos as i32) as usize;
+                            if new_pos != tab.btn_pos {
+                                tab.btn_pos = new_pos;
+                                self.tk_event_queue.push_back(TkEvent::ButtonSelect(self.cur_btn().unwrap().name().to_string()));
+                            }
+                        },
+                    InternalTkEvent::Press =>
+                        if let Some(btn) = self.cur_mut_btn() {
+                            if btn.captures_input() {
+                                self.redirect_input = true;
+                            } else {
+                                if let Some(new_ev) = btn.action(&tk_ev) {
+                                    self.tk_event_queue.push_back(new_ev);
+                                }
+                            }
+                        },
+                    InternalTkEvent::AnimationUpdate => todo!("animations"),
+                    InternalTkEvent::Quit =>            self.run = false,
+                    InternalTkEvent::Dummy => (),
+                }
             }
         } else {
             let out = match ev {
@@ -193,9 +363,16 @@ impl Toolkit {
     fn cur_tab(&self) -> Option<&Tab> {
         self.tabs.get(self.tab_pos)
     }
-    fn cur_btn(&self) -> Option<&Button> {
+    fn cur_mut_btn(&mut self) -> Option<&mut Box<dyn Buttonish>> {
+        if let Some(tab) = self.cur_mut_tab() {
+            tab.cur_mut_btn()
+        } else {
+            None
+        }
+    }
+    fn cur_btn(&self) -> Option<&Box<dyn Buttonish>> {
         if let Some(tab) = self.tabs.get(self.tab_pos) {
-            tab.buttons.get(tab.btn_pos)
+            tab.cur_btn()
         } else {
             None
         }
@@ -271,20 +448,30 @@ impl ToolkitBuilder {
 
 pub struct TabBuilder {
     name: &'static str,
-    buttons: Vec<Button>,
+    buttons: Vec<Box<dyn Buttonish>>,
     builder: ToolkitBuilder,
 }
 
 impl TabBuilder {
     pub fn button(mut self, name: &'static str) -> TabBuilder {
         let text = self.builder.render_text(name);
-        self.buttons.push(Button::new(name, self.buttons.len(), text));
+        self.buttons.push(Box::new(Button::new(name, self.buttons.len(), text)));
+        self
+    }
+    pub fn toggle(mut self, name: &'static str) -> TabBuilder {
+        let text = self.builder.render_text(name);
+        self.buttons.push(Box::new(Toggle::new(name, self.buttons.len(), text)));
+        self
+    }
+    pub fn slider(mut self, name: &'static str, cur: i32, min: i32, max: i32) -> TabBuilder {
+        let text = self.builder.render_text(name);
+        self.buttons.push(Box::new(Slider::new(name, text, self.buttons.len(), cur, min, max)));
         self
     }
     pub fn buttons_vec(mut self, names: Vec<&'static str>) -> TabBuilder {
         for name in names {
             let text = self.builder.render_text(name);
-            self.buttons.push(Button::new(name, self.buttons.len(), text));
+            self.buttons.push(Box::new(Button::new(name, self.buttons.len(), text)));
         }
         self
     }
@@ -335,6 +522,7 @@ impl TabBuilder {
             event_sender: self.builder.event_sender,
             tab_pos: 0,
             max_tab_pos,
+            redirect_input: false,
             tk_event_queue: VecDeque::new(),
         }
     }
