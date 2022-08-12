@@ -14,6 +14,8 @@ fn main() {
         .build();
 
     while tk.tick() {
-        //println!("{:#?}", tk);
+        for ev in tk.poll_events() {
+            println!("{:#?}", ev);
+        }
     }
 }

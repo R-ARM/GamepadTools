@@ -90,8 +90,9 @@ enum InternalTkEvent {
     Quit,
     Dummy,
 }
+
 #[derive(Debug, PartialEq)]
-enum TkEvent {
+pub enum TkEvent {
     ButtonSelect(String),
     ButtonPress(String),
     TabChange(String),
@@ -130,13 +131,25 @@ impl Toolkit {
         if ev.is_user_event() {
             let tk_ev = ev.as_user_event_type::<InternalTkEvent>().unwrap();
             match tk_ev {
-                InternalTkEvent::ChangeTabPos(p) =>
-                    self.tab_pos = clamp(self.tab_pos as i32 + p, 0, self.max_tab_pos as i32) as usize,
+                InternalTkEvent::ChangeTabPos(p) => {
+                    let new_pos = clamp(self.tab_pos as i32 + p, 0, self.max_tab_pos as i32) as usize;
+                    if new_pos != self.tab_pos {
+                        self.tab_pos = new_pos;
+                        self.tk_event_queue.push_back(TkEvent::TabChange(self.cur_tab().unwrap().name.to_string()));
+                    }
+                }
                 InternalTkEvent::ChangeBtnPos(p) => 
-                    if let Some(mut tab) = self.cur_tab() {
-                        tab.btn_pos = clamp(tab.btn_pos as i32 + p, 0, tab.max_btn_pos as i32) as usize;
+                    if let Some(mut tab) = self.cur_mut_tab() {
+                        let new_pos = clamp(tab.btn_pos as i32 + p, 0, tab.max_btn_pos as i32) as usize;
+                        if new_pos != tab.btn_pos {
+                            tab.btn_pos = new_pos;
+                            self.tk_event_queue.push_back(TkEvent::ButtonSelect(self.cur_btn().unwrap().name.to_string()));
+                        }
                     },
-                InternalTkEvent::Press =>           todo!("button presses"),
+                InternalTkEvent::Press =>
+                    if let Some(btn) = self.cur_btn() {
+                        self.tk_event_queue.push_back(TkEvent::ButtonPress(btn.name.to_string()));
+                    }
                 InternalTkEvent::AnimationUpdate => todo!("animations"),
                 InternalTkEvent::Quit =>            self.run = false,
                 InternalTkEvent::Dummy => (),
@@ -170,8 +183,22 @@ impl Toolkit {
         ToolkitBuilder::new(name)
     }
 
-    fn cur_tab(&mut self) -> Option<&mut Tab> {
+    pub fn poll_events(&mut self) -> Option<TkEvent> {
+        self.tk_event_queue.pop_front()
+    }
+
+    fn cur_mut_tab(&mut self) -> Option<&mut Tab> {
         self.tabs.get_mut(self.tab_pos)
+    }
+    fn cur_tab(&self) -> Option<&Tab> {
+        self.tabs.get(self.tab_pos)
+    }
+    fn cur_btn(&self) -> Option<&Button> {
+        if let Some(tab) = self.tabs.get(self.tab_pos) {
+            tab.buttons.get(tab.btn_pos)
+        } else {
+            None
+        }
     }
 }
 
