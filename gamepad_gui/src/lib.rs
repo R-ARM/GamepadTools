@@ -411,12 +411,11 @@ impl Toolkit {
                     InternalTkEvent::Quit => self.run = false,
                     InternalTkEvent::SetOffsetY(y) => {
                         self.y_offset = y;
-                        self.y_velocity = 0;
                         redraw = true;
                     },
                     InternalTkEvent::AppendOffsetY(y) => {
                         self.y_offset += y;
-                        self.y_velocity = y/2;
+                        self.y_velocity = y*15;
                         redraw = true;
                     },
                     InternalTkEvent::TouchPress(x, y) => {
@@ -464,7 +463,7 @@ impl Toolkit {
         }
 
         if self.y_velocity != 0 {
-            self.y_offset += self.y_velocity;
+            self.y_offset += self.y_velocity/15;
             if self.y_velocity > 0 {
                 self.y_velocity -= 1;
             } else {
